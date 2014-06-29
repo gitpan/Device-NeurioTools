@@ -1,4 +1,4 @@
-package Device::NeurioTools;
+package NeurioTools;
 
 use strict;
 use warnings;
@@ -15,15 +15,27 @@ our @ISA = qw(Exporter);
 # If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
 # will save memory.
 our %EXPORT_TAGS = ( 'all' => [ qw(
-	
+    new connect set_rate get_cost get_kwh
 ) ] );
 
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
-our @EXPORT = qw(
-	
-);
+our @EXPORT = qw();
 
+BEGIN
+{
+  if ($^O eq "MSWin32"){
+    use Device::Neurio;
+    use DateTime;
+    use DateTime::Format::ISO8601;
+    use Data::Dumper;
+  } else {
+    use Device::Neurio;
+    use DateTime;
+    use DateTime::Format::ISO8601;
+    use Data::Dumper;
+  }
+}
 
 
 =head1 NAME
@@ -32,11 +44,11 @@ Device::NeurioTools - More complex methods for accessing data collected by a Neu
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 #*****************************************************************
 
@@ -83,6 +95,24 @@ All by default.
  Returns 0 on failure
 =cut
 sub new {
+    my $class = shift;
+    my $self;
+
+    $self->{'key'}       = shift;
+    $self->{'secret'}    = shift;
+    $self->{'sensor_id'} = shift;
+	$self->{'rate'}      = 0;
+    
+    if ((!defined $self->{'key'}) || (!defined $self->{'secret'}) || (!defined $self->{'sensor_id'})) {
+      print "NeurioTools->new(): Key, Secret and Sensor_ID are REQUIRED parameters.\n";
+      return 0;
+    }
+
+    $self->{'neurio'} = Device::Neurio->new($self->{'key'},$self->{'secret'},$self->{'sensor_id'});
+    
+    bless $self, $class;
+    
+    return $self;
 }
 
 
@@ -101,6 +131,14 @@ sub new {
  Returns 0 on failure
 =cut
 sub connect {
+	my $self = shift;
+    
+    if($self->{'neurio'}->connect()) {
+      return 1;
+    } else {
+      print "NeurioTools->connect(): Failed to connect.\n";
+      return 0;
+    }
 }
 
 #*****************************************************************
@@ -118,6 +156,15 @@ sub connect {
  Returns 0 on failure
 =cut
 sub set_rate {
+	my ($self,$rate) = @_;
+	
+    if (defined $rate) {
+	  $self->{'rate'} = $rate;
+	  return 1;
+    } else {
+      print "NeurioTools->set_rate(): No rate specified\n";
+      return 0;
+    }
 }
 
 
@@ -139,6 +186,18 @@ sub set_rate {
  Returns 0 on failure
 =cut
 sub get_cost {
+    my ($self,$start,$granularity,$end,$frequency) = @_;
+    my $i=0;
+    
+    if ($self->{'rate'} ==0 ) {
+        print "NeurioTools->get_cost(): Cannot calculate cost since rate is set to zero\n";
+        return 0;
+    }
+    
+    my $kwh  = $self->get_kwh($start,$granularity,$end,$frequency);
+    my $cost = $kwh*$self->{'rate'};
+    
+    return $cost;
 }
 
 
@@ -160,6 +219,25 @@ sub get_cost {
  Returns 0 on failure
 =cut
 sub get_kwh {
+    my ($self,$start,$granularity,$end,$frequency) = @_;
+    my $samples = 0;
+    my $power   = 0;
+    my $kwh;
+    
+    my $data = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
+    
+    my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
+    my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
+    my $dur_obj   = $end_obj->subtract_datetime($start_obj);
+    my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
+    while (defined $data->[$samples]->{'consumptionPower'}) {
+        $power=$power+$data->[$samples]->{'consumptionPower'};
+        $samples++;
+    }
+    
+    $kwh = $power/1000*$duration/60/60/$samples;
+
+    return $kwh;
 }
 
 
