@@ -4,4 +4,5 @@ Revision history for Perl extension Device::NeurioTools.
         First version, contains documentation only
 0.02    June 28, 2014
         added code for basic functions
-
+0.03    July 01, 2014
+        added support for timezones

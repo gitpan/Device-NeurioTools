@@ -1,7 +1,7 @@
-package NeurioTools;
+package Device::NeurioTools;
 
-use strict;
 use warnings;
+use strict;
 
 require Exporter;
 
@@ -26,12 +26,12 @@ BEGIN
 {
   if ($^O eq "MSWin32"){
     use Device::Neurio;
-    use DateTime;
+    use Time::Local;
     use DateTime::Format::ISO8601;
     use Data::Dumper;
   } else {
     use Device::Neurio;
-    use DateTime;
+    use Time::Local;
     use DateTime::Format::ISO8601;
     use Data::Dumper;
   }
@@ -44,11 +44,11 @@ Device::NeurioTools - More complex methods for accessing data collected by a Neu
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 #*****************************************************************
 
@@ -150,7 +150,7 @@ sub connect {
    $NeurioTools->set_rate($rate);
  
    This method accepts the following parameters:
-     - $rate      : amount charged per kwh - Required parameter
+     - $rate      : amount charged per kwh - Required
  
  Returns 1 on success 
  Returns 0 on failure
@@ -160,11 +160,84 @@ sub set_rate {
 	
     if (defined $rate) {
 	  $self->{'rate'} = $rate;
+      print "NeurioTools->set_rate(): $self->{'rate'}\n";
 	  return 1;
     } else {
       print "NeurioTools->set_rate(): No rate specified\n";
       return 0;
     }
+}
+
+
+#*****************************************************************
+
+=head2 get_rate - return the rate charged by your electicity provider
+
+ Returns the value for rate set using 'set_rate()'
+
+   $NeurioTools->get_rate();
+ 
+   This method accepts no parameters
+ 
+ Returns rate 
+=cut
+sub get_rate {
+	my $self = shift;
+    return $self->{'rate'};
+}
+
+
+#*****************************************************************
+
+=head2 set_timezone - set the timezone offset
+
+ Sets the timezone offset.  If no parameter is specified it uses the system
+ defined timezone offset.
+
+   $NeurioTools->set_timezone($offset);
+ 
+   This method accepts the following parameters:
+     - $offset      : specified timezone offset in minutes - Optional
+ 
+ Returns 1 on success 
+ Returns 0 on failure
+=cut
+sub set_timezone {
+	my ($self,$offset) = @_;
+	my ($total,$hours,$mins);
+	
+    if (defined $offset) {
+	  $total = $offset;
+    } else {
+      my @utc   = gmtime();
+      my @loc   = localtime();
+      $total = ($loc[2]*60+$loc[1])-($utc[2]*60+$utc[1]);
+    }
+    $hours = sprintf("%+03d",$total / 60);
+    $mins  = sprintf("%02d",$total % 60);
+    $self->{'timezone'} = "$hours:$mins";
+    print "NeurioTools->set_timezone(): $self->{'timezone'}\n";
+    
+    return 1;
+}
+
+
+#*****************************************************************
+
+=head2 get_timezone - return the timezone offset
+
+ Returns the value for the timezone offset in minutes
+
+   $NeurioTools->get_timezone();
+ 
+   This method accepts no parameters
+ 
+ Returns timezone offset 
+=cut
+sub get_timezone {
+	my $self = shift;
+	
+    return $self->{'timezone'};
 }
 
 
@@ -211,8 +284,10 @@ sub get_cost {
  
    This method accepts the following parameters:
      - start       : yyyy-mm-ddThh:mm:ssZ - Required
+                     specified using ISO8601 format
      - granularity : seconds|minutes|hours|days - Required
      - end         : yyyy-mm-ddThh:mm:ssZ - Optional
+                     specified using ISO8601 format
      - frequency   : an integer - Optional
  
  Returns the kwh on success 
