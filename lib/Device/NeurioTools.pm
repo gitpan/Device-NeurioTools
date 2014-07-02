@@ -44,11 +44,11 @@ Device::NeurioTools - More complex methods for accessing data collected by a Neu
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 #*****************************************************************
 
@@ -71,6 +71,21 @@ our $VERSION = '0.03';
 
 =head1 SAMPLE CODE
 
+    use Device::Neurio;
+    use Device::NeurioTools;
+
+    my $my_Neurio = Device::Neurio->new($key,$secret,$sensor_id);
+
+    $my_Neurio->connect();
+
+    my $my_NeurioTools = Device::NeurioTools->new($my_Neurio);
+
+    $my_NeurioTools->set_timezone();
+    $my_NeurioTools->set_rate(0.08);
+    my $kwh = $my_NeurioTools->get_kwh("2014-06-24T00:00:00".$my_NeurioTools->get_timezone(),
+                                       "minutes",
+                                       "2014-06-24T23:59:59".$my_NeurioTools->get_timezone(),
+                                       "5");
 
 =head2 EXPORT
 
@@ -81,65 +96,35 @@ All by default.
 
 =head2 new - the constructor for a NeurioTools object
 
- Creates a new instance which will be able to fetch data from a unique Neurio 
- sensor.
+ Creates a new instance of NeurioTools which will be able to fetch data from 
+ a unique Neurio sensor.
 
- my $Neurio = Device::NeurioTools->new($key,$secret,$sensor_id);
+ my $Neurio = Device::NeurioTools->new($neurio);
 
    This method accepts the following parameters:
-     - $key       : unique key for the account - Required parameter
-     - $secret    : secret key for the account - Required parameter
-     - $sensor_id : sensor ID connected to the account - Required parameter
+     - $neurio    : a valid CONNECTED Neurio object
 
- Returns a NeurioTools object if successful.
+ Returns 1 on success
  Returns 0 on failure
 =cut
 sub new {
     my $class = shift;
     my $self;
 
-    $self->{'key'}       = shift;
-    $self->{'secret'}    = shift;
-    $self->{'sensor_id'} = shift;
+    $self->{'neurio'}    = shift;
 	$self->{'rate'}      = 0;
+	$self->{'timezone'}  = "+00:00";
     
-    if ((!defined $self->{'key'}) || (!defined $self->{'secret'}) || (!defined $self->{'sensor_id'})) {
-      print "NeurioTools->new(): Key, Secret and Sensor_ID are REQUIRED parameters.\n";
+    if (!defined $self->{'neurio'}) {
+      print "NeurioTools->new(): a valid Neurio object is a REQUIRED parameter.\n";
       return 0;
     }
-
-    $self->{'neurio'} = Device::Neurio->new($self->{'key'},$self->{'secret'},$self->{'sensor_id'});
     
     bless $self, $class;
     
     return $self;
 }
 
-
-#*****************************************************************
-
-=head2 connect - open a secure connection to the Neurio server
-
- Opens a secure connection via HTTPS to the Neurio server which provides
- access to a set of API commands to access the sensor data.
-
-   $NeurioTools->connect();
- 
- This method accepts no parameters
- 
- Returns 1 on success 
- Returns 0 on failure
-=cut
-sub connect {
-	my $self = shift;
-    
-    if($self->{'neurio'}->connect()) {
-      return 1;
-    } else {
-      print "NeurioTools->connect(): Failed to connect.\n";
-      return 0;
-    }
-}
 
 #*****************************************************************
 

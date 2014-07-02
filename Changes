@@ -6,3 +6,7 @@ Revision history for Perl extension Device::NeurioTools.
         added code for basic functions
 0.03    July 01, 2014
         added support for timezones
+0.04    July 02, 2014
+        changed constructor to accept a Neurio object
+        removed the Connect method
+        

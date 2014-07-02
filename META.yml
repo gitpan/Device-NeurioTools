@@ -19,4 +19,4 @@ no_index:
     - inc
 requires:
   DateTime::Format::ISO8601: 0.08
-version: 0.03
+version: 0.04
