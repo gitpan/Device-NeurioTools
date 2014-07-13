@@ -9,4 +9,6 @@ Revision history for Perl extension Device::NeurioTools.
 0.04    July 02, 2014
         changed constructor to accept a Neurio object
         removed the Connect method
-        
+0.05    July 13, 2014
+        added methods for 'power consumed', 'power generated' and energy consumed'
+                
