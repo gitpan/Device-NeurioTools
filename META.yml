@@ -21,4 +21,4 @@ requires:
   DateTime::Format::ISO8601: 0.08
   Device::Neurio: 0.10
   Time::Local: 1.2000
-version: 0.05
+version: 0.06

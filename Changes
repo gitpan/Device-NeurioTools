@@ -11,4 +11,9 @@ Revision history for Perl extension Device::NeurioTools.
         removed the Connect method
 0.05    July 13, 2014
         added methods for 'power consumed', 'power generated' and energy consumed'
+0.06    July 19, 2014
+        changed 'rate' methods to 'flat_rate' to accomodate TOU methods coming
+        updated documentation
+        added option to support debug printouts
+        added method for 'get_power_consumed'
                 

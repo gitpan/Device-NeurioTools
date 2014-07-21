@@ -2,6 +2,7 @@ package Device::NeurioTools;
 
 use warnings;
 use strict;
+use 5.006_001; 
 
 require Exporter;
 
@@ -16,7 +17,7 @@ our @ISA = qw(Exporter);
 # will save memory.
 
 our %EXPORT_TAGS = ( 'all' => [ qw(
-    new get_cost get_energy_consumed get_kwh_consumed get kwh_generated get_power_consumed get_rate get_timezone set_rate set_timezone
+    new get_flat_cost get_energy_consumed get_kwh_consumed get kwh_generated get_power_consumed get_flat_rate get_timezone set_flat_rate set_timezone
 ) ] );
 
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
@@ -45,11 +46,11 @@ Device::NeurioTools - More complex methods for accessing data collected by a
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =cut
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 #*****************************************************************
 
@@ -59,8 +60,9 @@ our $VERSION = '0.05';
  collected by a Neurio sensor.  This is done via an extended set of methods: 
    - new
    - connect
-   - set_rate
-   - get_cost
+   - set_flat_rate
+   - get_flat_rate
+   - get_flat_cost
    - get_kwh
   
  Please note that in order to use this module you will require three parameters
@@ -79,10 +81,10 @@ our $VERSION = '0.05';
 
     $my_Neurio->connect();
 
-    $my_NeurioTools = Device::NeurioTools->new($my_Neurio);
+    $my_NeurioTools = Device::NeurioTools->new($my_Neurio,$debug);
 
     $my_NeurioTools->set_timezone();
-    $my_NeurioTools->set_rate(0.08);
+    $my_NeurioTools->set_flat_rate(0.08);
     
     $start = "2014-06-24T00:00:00".$my_NeurioTools->get_timezone();
     $end   = "2014-06-24T23:59:59".$my_NeurioTools->get_timezone();
@@ -103,10 +105,11 @@ All by default.
  Creates a new instance of NeurioTools which will be able to fetch data from 
  a unique Neurio sensor.
 
- my $Neurio = Device::NeurioTools->new($neurio);
+ my $Neurio = Device::NeurioTools->new($neurio, $debug);
 
    This method accepts the following parameters:
-     - $neurio    : a valid CONNECTED Neurio object
+     - $neurio : a valid CONNECTED Neurio object
+     - $debug  : enable or disable debug messages (disabled by default - optional)
 
  Returns 1 on success
  Returns 0 on failure
@@ -116,8 +119,13 @@ sub new {
     my $self;
 
     $self->{'neurio'}    = shift;
-	$self->{'rate'}      = 0;
+    $self->{'debug'}     = shift;
+	$self->{'flat_rate'} = 0;
 	$self->{'timezone'}  = "+00:00";
+    
+    if (!defined $self->{'debug'}) {
+      $self->{'debug'} = 0;
+    }
     
     if (!defined $self->{'neurio'}) {
       print "NeurioTools->new(): a valid Neurio object is a REQUIRED parameter.\n";
@@ -132,11 +140,11 @@ sub new {
 
 #*****************************************************************
 
-=head2 set_rate - set the rate charged by your electicity provider
+=head2 set_flat_rate - set the rate charged by your electicity provider
 
  Defines the rate charged by your electricity provider.
 
-   $NeurioTools->set_rate($rate);
+   $NeurioTools->set_flat_rate($rate);
  
    This method accepts the following parameters:
      - $rate      : amount charged per kwh - Required
@@ -144,15 +152,15 @@ sub new {
  Returns 1 on success 
  Returns 0 on failure
 =cut
-sub set_rate {
+sub set_flat_rate {
 	my ($self,$rate) = @_;
 	
     if (defined $rate) {
-	  $self->{'rate'} = $rate;
-      print "NeurioTools->set_rate(): $self->{'rate'}\n";
+	  $self->{'flat_rate'} = $rate;
+      print "NeurioTools->set_flat_rate(): $self->{'flat_rate'}\n" if ($self->{'debug'});
 	  return 1;
     } else {
-      print "NeurioTools->set_rate(): No rate specified\n";
+      print "NeurioTools->set_flat_rate(): No rate specified\n";
       return 0;
     }
 }
@@ -160,19 +168,19 @@ sub set_rate {
 
 #*****************************************************************
 
-=head2 get_rate - return the rate charged by your electicity provider
+=head2 get_flat_rate - return the rate charged by your electicity provider
 
- Returns the value for rate set using 'set_rate()'
+ Returns the value for rate set using 'set_flat_rate()'
 
-   $NeurioTools->get_rate();
+   $NeurioTools->get_flat_rate();
  
    This method accepts no parameters
  
  Returns rate 
 =cut
-sub get_rate {
+sub get_flat_rate {
 	my $self = shift;
-    return $self->{'rate'};
+    return $self->{'flat_rate'};
 }
 
 
@@ -233,13 +241,13 @@ sub get_timezone {
 
 #*****************************************************************
 
-=head2 get_cost - calculate the cost of consumed power for the specified period
+=head2 get_flat_cost - calculate the cost of consumed power for the specified period
 
  Calculates the cost of consumed power over the period specified.
 
-   $NeurioTools->get_cost($start,$granularity,$end,$frequency);
+   $NeurioTools->get_flat_cost($start,$granularity,$end,$frequency);
    
-   This method requires that a 'rate' be set using the set_rate() method
+   This method requires that a 'flat rate' be set using the set_flat_rate() method
  
    This method accepts the following parameters:
      - start       : yyyy-mm-ddThh:mm:ssZ - Required
@@ -250,17 +258,17 @@ sub get_timezone {
  Returns the cost on success 
  Returns 0 on failure
 =cut
-sub get_cost {
+sub get_flat_cost {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $i=0;
     
-    if ($self->{'rate'} == 0 ) {
-        print "NeurioTools->get_cost(): Cannot calculate cost since rate is set to zero\n";
+    if ($self->{'flat_rate'} == 0 ) {
+        print "NeurioTools->get_flat_cost(): Cannot calculate cost since rate is set to zero\n";
         return 0;
     }
     
     my $kwh  = $self->get_kwh_consumed($start,$granularity,$end,$frequency);
-    my $cost = $kwh*$self->{'rate'};
+    my $cost = $kwh*$self->{'flat_rate'};
     
     return $cost;
 }
