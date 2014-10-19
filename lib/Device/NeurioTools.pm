@@ -16,8 +16,10 @@ our @ISA = qw(Exporter);
 # If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
 # will save memory.
 
-our %EXPORT_TAGS = ( 'all' => [ qw(
-    new get_flat_cost get_energy_consumed get_kwh_consumed get kwh_generated get_power_consumed get_flat_rate get_timezone set_flat_rate set_timezone
+our %EXPORT_TAGS = ( 'all' => [ qw( new 
+    get_flat_cost get_flat_rate get_ISO8601_date get_ISO8601_time get_ISO8601_timezone 
+    get_kwh_consumed get kwh_generated get_power_consumed get_TwoTier_cost 
+    get_TwoTier_rate set_flat_rate set_ISO8601_timezone set_TwoTier_rate 
 ) ] );
 
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
@@ -29,11 +31,13 @@ BEGIN
     use Device::Neurio;
     use Time::Local;
     use DateTime::Format::ISO8601;
+    use POSIX;
     use Data::Dumper;
   } else {
     use Device::Neurio;
     use Time::Local;
     use DateTime::Format::ISO8601;
+    use POSIX;
     use Data::Dumper;
   }
 }
@@ -41,16 +45,16 @@ BEGIN
 
 =head1 NAME
 
-Device::NeurioTools - More complex methods for accessing data collected by a 
-                      Neurio sensor module.
+Device::NeurioTools - More complex methods and tools for accessing data 
+                      collected by a Neurio sensor module.
 
 =head1 VERSION
 
-Version 0.06
+Version 0.07
 
 =cut
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 #*****************************************************************
 
@@ -113,27 +117,30 @@ All by default.
 
  Returns 1 on success
  Returns 0 on failure
+ 
 =cut
+
 sub new {
     my $class = shift;
     my $self;
 
-    $self->{'neurio'}    = shift;
-    $self->{'debug'}     = shift;
-	$self->{'flat_rate'} = 0;
-	$self->{'timezone'}  = "+00:00";
+    $self->{'neurio'}         = shift;
+    $self->{'debug'}          = shift;
+	$self->{'flat_rate'}      = 0;
+    $self->{'TwoTier_rate1'}  = 0;
+    $self->{'TwoTier_cutoff'} = 0;
+    $self->{'TwoTier_rate2'}  = 0;
+	$self->{'timezone'}       = "+00:00";
     
     if (!defined $self->{'debug'}) {
       $self->{'debug'} = 0;
     }
     
     if (!defined $self->{'neurio'}) {
-      print "NeurioTools->new(): a valid Neurio object is a REQUIRED parameter.\n";
+      print "NeurioTools->new(): a valid Neurio object is a REQUIRED parameter.\n" if ($self->{'debug'});
       return 0;
     }
-    
     bless $self, $class;
-    
     return $self;
 }
 
@@ -147,11 +154,13 @@ sub new {
    $NeurioTools->set_flat_rate($rate);
  
    This method accepts the following parameters:
-     - $rate      : amount charged per kwh - Required
+     - $rate      : rate charged per kwh - Required
  
  Returns 1 on success 
  Returns 0 on failure
+ 
 =cut
+
 sub set_flat_rate {
 	my ($self,$rate) = @_;
 	
@@ -160,7 +169,7 @@ sub set_flat_rate {
       print "NeurioTools->set_flat_rate(): $self->{'flat_rate'}\n" if ($self->{'debug'});
 	  return 1;
     } else {
-      print "NeurioTools->set_flat_rate(): No rate specified\n";
+      print "NeurioTools->set_flat_rate(): No rate specified\n" if ($self->{'debug'});
       return 0;
     }
 }
@@ -168,16 +177,59 @@ sub set_flat_rate {
 
 #*****************************************************************
 
-=head2 get_flat_rate - return the rate charged by your electicity provider
+=head2 set_TwoTier_rate - set the two tier rates charged by your electicity provider
 
- Returns the value for rate set using 'set_flat_rate()'
+ Defines the two tier rates charged by your electricity provider.
+ The two tiers are defined according to the power consumed.
+ 
+ For example:
+   - $0.05 for the first 20 kWh per day
+   - $0.08 for the remaining kWh per day
+
+   $NeurioTools->set_TwoTier_rate($rate1,$cutoff,$rate2);
+ 
+   This method accepts the following parameters:
+     - $rate1     : rate charged per kwh for usage up to the cutoff - Required
+     - $cutoff    : power consumtion point in kWh at which the rate changes - Required
+     - $rate2     : rate charged per kwh for usage abpve the cutoff - Required
+ 
+ Returns 1 on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub set_TwoTier_rate {
+    my ($self,$rate1,$cutoff,$rate2) = @_;
+    
+    if (defined $rate1 and defined $cutoff and defined $rate2) {
+      $self->{'TwoTier_rate1'}  = $rate1;
+      $self->{'TwoTier_cutoff'} = $cutoff;
+      $self->{'TwoTier_rate2'}  = $rate2;
+      print "NeurioTools->set_TwoTier_rate(): $self->{'TwoTier_rate1'}\n"  if ($self->{'debug'});
+      print "NeurioTools->set_TwoTier_rate(): $self->{'TwoTier_cutoff'}\n" if ($self->{'debug'});
+      print "NeurioTools->set_TwoTier_rate(): $self->{'TwoTier_rate2'}\n"  if ($self->{'debug'});
+      return 1;
+    } else {
+      print "NeurioTools->set_TwoTier_rate(): No rate specified\n" if ($self->{'debug'});
+      return 0;
+    }
+}
+
+
+#*****************************************************************
+
+=head2 get_flat_rate - return the flat rate charged by your electicity provider
+
+ Returns the value for the flat rate set using 'set_flat_rate()'
 
    $NeurioTools->get_flat_rate();
  
    This method accepts no parameters
  
  Returns rate 
+ 
 =cut
+
 sub get_flat_rate {
 	my $self = shift;
     return $self->{'flat_rate'};
@@ -186,56 +238,58 @@ sub get_flat_rate {
 
 #*****************************************************************
 
-=head2 set_timezone - set the timezone offset
+=head2 get_TwoTier_rate - return the cutoff and two tier rates charged by your electicity provider
 
- Sets the timezone offset.  If no parameter is specified it uses the system
- defined timezone offset.
+ Returns the value for the cutoff and two tier rates set using 'set_TwoTier_rate()'
 
-   $NeurioTools->set_timezone($offset);
+   $NeurioTools->get_TwoTier_rate();
+ 
+   This method accepts no parameters
+ 
+ Returns list containing cutoff and rates 
+ 
+=cut
+
+sub get_TwoTier_rate {
+    my $self = shift;
+    return ($self->{'TwoTier_rate1'},$self->{'TwoTier_cutoff'},$self->{'TwoTier_rate2'});
+}
+
+
+#*****************************************************************
+
+=head2 set_ISO8601_timezone - set the timezone offset for ISO8601
+
+ Sets the timezone offset in ISO8601 format.  If no parameter is specified it 
+ sets the system defined timezone offset.
+
+   $NeurioTools->set_ISO8601_timezone($offset);
  
    This method accepts the following parameters:
      - $offset      : specified timezone offset in minutes - Optional
  
  Returns 1 on success 
  Returns 0 on failure
+ 
 =cut
-sub set_timezone {
+
+sub set_ISO8601_timezone {
 	my ($self,$offset) = @_;
-	my ($total,$hours,$mins);
+	my ($total,$hours,$mins,$tz);
 	
     if (defined $offset) {
 	  $total = $offset;
+      $hours = sprintf("%+03d",$total / 60);
+      $mins  = sprintf("%02d",$total % 60);
+      $tz    = "$hours:$mins";
     } else {
-      my @utc = gmtime();
-      my @loc = localtime();
-      $total  = ($loc[2]*60+$loc[1])-($utc[2]*60+$utc[1]);
+      $tz    = strftime("%z", localtime(time()));
+      substr($tz,3,0,":");
     }
-    
-    $hours = sprintf("%+03d",$total / 60);
-    $mins  = sprintf("%02d",$total % 60);
-    $self->{'timezone'} = "$hours:$mins";
-    print "NeurioTools->set_timezone(): $self->{'timezone'}\n";
+    $self->{'timezone'} = $tz;
+    print "NeurioTools->set_ISO8601_timezone(): $self->{'timezone'}\n" if ($self->{'debug'});
     
     return 1;
-}
-
-
-#*****************************************************************
-
-=head2 get_timezone - return the timezone offset
-
- Returns the value for the timezone offset in minutes
-
-   $NeurioTools->get_timezone();
- 
-   This method accepts no parameters
- 
- Returns timezone offset 
-=cut
-sub get_timezone {
-	my $self = shift;
-	
-    return $self->{'timezone'};
 }
 
 
@@ -250,26 +304,73 @@ sub get_timezone {
    This method requires that a 'flat rate' be set using the set_flat_rate() method
  
    This method accepts the following parameters:
-     - start       : yyyy-mm-ddThh:mm:ssZ - Required
-     - granularity : seconds|minutes|hours|days - Required
-     - end         : yyyy-mm-ddThh:mm:ssZ - Optional
-     - frequency   : an integer - Optional
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+     - $frequency   : an integer - Optional
  
  Returns the cost on success 
  Returns 0 on failure
+ 
 =cut
+
 sub get_flat_cost {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $i=0;
     
     if ($self->{'flat_rate'} == 0 ) {
-        print "NeurioTools->get_flat_cost(): Cannot calculate cost since rate is set to zero\n";
+        print "NeurioTools->get_flat_cost(): Cannot calculate cost since rate is set to zero\n" if ($self->{'debug'});
         return 0;
     }
     
     my $kwh  = $self->get_kwh_consumed($start,$granularity,$end,$frequency);
     my $cost = $kwh*$self->{'flat_rate'};
     
+    return $cost;
+}
+
+
+#*****************************************************************
+
+=head2 get_TwoTier_cost - calculate the cost of consumed power for the specified period
+
+ Calculates the cost of consumed power over the period specified.
+
+   $NeurioTools->get_TwoTier_cost($start,$granularity,$end,$frequency);
+   
+   This method requires that a 'TwoTier rate' be set using the set_TwoTier_rate() method
+ 
+   This method accepts the following parameters:
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+     - $frequency   : an integer - Optional
+ 
+ Returns the cost on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub get_TwoTier_cost {
+    my ($self,$start,$granularity,$end,$frequency) = @_;
+    my $i    = 0;
+    my $cost = 0;
+    
+    if ($self->{'TwoTier_rate1'} == 0 or $self->{'TwoTier_cutoff'} == 0 or $self->{'TwoTier_rate2'} == 0) {
+        print "NeurioTools->get_TwoTier_cost(): Cannot calculate cost since a parameter is set to zero\n" if ($self->{'debug'});
+        return 0;
+    }
+    
+    my $kwh  = $self->get_kwh_consumed($start,$granularity,$end,$frequency);
+    
+    if ($kwh != 0) {
+      if ($kwh <= $self->{'TwoTier_cutoff'}) {
+        $cost = $kwh * $self->{'TwoTier_rate1'};
+      } else {
+        $cost = $self->{'TwoTier_cutoff'} * $self->{'TwoTier_rate1'};
+        $cost = $cost + ($kwh - $self->{'TwoTier_cutoff'})*$self->{'TwoTier_rate2'};
+      }
+    }
     return $cost;
 }
 
@@ -283,35 +384,38 @@ sub get_flat_cost {
    $NeurioTools->get_kwh_consumed($start,$granularity,$end,$frequency);
  
    This method accepts the following parameters:
-     - start       : yyyy-mm-ddThh:mm:ssZ - Required
-                     specified using ISO8601 format
-     - granularity : seconds|minutes|hours|days - Required
-     - end         : yyyy-mm-ddThh:mm:ssZ - Optional
-                     specified using ISO8601 format
-     - frequency   : an integer - Optional
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+                      specified using ISO8601 format
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+                      specified using ISO8601 format
+     - $frequency   : an integer - Optional
  
  Returns the kwh on success 
  Returns 0 on failure
+ 
 =cut
+
 sub get_kwh_consumed {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $energy  = 0;
     my $samples = 0;
-    my $kwh;
+    my $kwh     = 0;
     
-    my $data      = $self->{'neurio'}->fetch_Energy_Stats($start,$granularity,$end,$frequency,"1","5000");
-    my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
-    my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
-    my $dur_obj   = $end_obj->subtract_datetime($start_obj);
-    my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
+    my $data = $self->{'neurio'}->fetch_Stats_Energy($start,$granularity,$end,$frequency,"1","5000");
+    if ($data != 0) {
+      my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
+      my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
+      my $dur_obj   = $end_obj->subtract_datetime($start_obj);
+      my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
     
-    while (defined $data->[$samples]->{'consumptionEnergy'}) {
+      while (defined $data->[$samples]->{'consumptionEnergy'}) {
         $energy = $energy + $data->[$samples]->{'consumptionEnergy'};
         $samples++;
+      }
+      $kwh = $energy/(1000*3600);
     }
     
-    $kwh = $energy/(1000*3600);
-
     return $kwh;
 }
 
@@ -325,35 +429,38 @@ sub get_kwh_consumed {
    $NeurioTools->get_kwh_generated($start,$granularity,$end,$frequency);
  
    This method accepts the following parameters:
-     - start       : yyyy-mm-ddThh:mm:ssZ - Required
-                     specified using ISO8601 format
-     - granularity : seconds|minutes|hours|days - Required
-     - end         : yyyy-mm-ddThh:mm:ssZ - Optional
-                     specified using ISO8601 format
-     - frequency   : an integer - Optional
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+                      specified using ISO8601 format
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+                      specified using ISO8601 format
+     - $frequency   : an integer - Optional
  
  Returns the kwh on success 
  Returns 0 on failure
+ 
 =cut
+
 sub get_kwh_generated {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $samples = 0;
     my $power   = 0;
-    my $kwh;
+    my $kwh     = 0;
     
-    my $data      = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
-    my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
-    my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
-    my $dur_obj   = $end_obj->subtract_datetime($start_obj);
-    my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
+    my $data = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
+    if ($data != 0) {
+      my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
+      my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
+      my $dur_obj   = $end_obj->subtract_datetime($start_obj);
+      my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
     
-    while (defined $data->[$samples]->{'generationPower'}) {
+      while (defined $data->[$samples]->{'generationPower'}) {
         $power = $power + $data->[$samples]->{'generationPower'};
         $samples++;
+      }
+      $kwh = $power/1000*$duration/60/60/$samples;
     }
     
-    $kwh = $power/1000*$duration/60/60/$samples;
-
     return $kwh;
 }
 
@@ -367,36 +474,70 @@ sub get_kwh_generated {
    $NeurioTools->get_energy_consumed($start,$granularity,$end,$frequency);
  
    This method accepts the following parameters:
-     - start       : yyyy-mm-ddThh:mm:ssZ - Required
-                     specified using ISO8601 format
-     - granularity : seconds|minutes|hours|days - Required
-     - end         : yyyy-mm-ddThh:mm:ssZ - Optional
-                     specified using ISO8601 format
-     - frequency   : an integer - Optional
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+                      specified using ISO8601 format
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+                      specified using ISO8601 format
+     - $frequency   : an integer - Optional
  
  Returns the energy on success 
  Returns 0 on failure
+ 
 =cut
+
 sub get_energy_consumed {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $samples = 0;
-    my $energy   = 0;
-    my $kwh;
+    my $energy  = 0;
+    my $kwh     = 0;
     
-    my $data      = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
-    my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
-    my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
-    my $dur_obj   = $end_obj->subtract_datetime($start_obj);
-    my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
+    my $data = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
+    if ($data != 0) {
+      my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
+      my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
+      my $dur_obj   = $end_obj->subtract_datetime($start_obj);
+      my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
     
-    while (defined $data->[$samples]->{'consumptionEnergy'}) {
+      while (defined $data->[$samples]->{'consumptionEnergy'}) {
         $energy = $energy + $data->[$samples]->{'consumptionEnergy'};
         $samples++;
+      }
+      return $energy;
     }
-    
-    return $energy;
 }
 
+
+#*****************************************************************
+
+=head2 get_appliance_ID - return the id for the appliance specified
+
+ Returns the appliance ID for the name specified.
+
+   $NeurioTools->get_appliance_ID($name);
+ 
+   This method accepts the following parameters:
+     - $name       : textual name of appliance - Required
+ 
+ Returns the appliance ID on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub get_appliance_ID {
+    my ($self,$name) = @_;
+    my $appliance;
+    
+    my $data = $self->{'neurio'}->fetch_Appliances();
+    if ($data != 0) {
+      foreach $appliance (@{$data}) {
+        if ($appliance->{'name'} eq $name) {
+           return $appliance->{'id'};
+        }
+      }
+    }
+    return 0;
+}
 
 #*****************************************************************
 
@@ -407,33 +548,152 @@ sub get_energy_consumed {
    $NeurioTools->get_energy_consumed($start,$granularity,$end,$frequency);
  
    This method accepts the following parameters:
-     - start       : yyyy-mm-ddThh:mm:ssZ - Required
-                     specified using ISO8601 format
-     - granularity : seconds|minutes|hours|days - Required
-     - end         : yyyy-mm-ddThh:mm:ssZ - Optional
-                     specified using ISO8601 format
-     - frequency   : an integer - Optional
+     - $start       : yyyy-mm-ddThh:mm:ssZ - Required
+                      specified using ISO8601 format
+     - $granularity : seconds|minutes|hours|days - Required
+     - $end         : yyyy-mm-ddThh:mm:ssZ - Optional
+                      specified using ISO8601 format
+     - $frequency   : an integer - Optional
  
  Returns the energy on success 
  Returns 0 on failure
+ 
 =cut
+
 sub get_power_consumed {
     my ($self,$start,$granularity,$end,$frequency) = @_;
     my $samples = 0;
     my $power   = 0;
     
-    my $data      = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
-    my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
-    my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
-    my $dur_obj   = $end_obj->subtract_datetime($start_obj);
-    my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
+    my $data = $self->{'neurio'}->fetch_Samples($start,$granularity,$end,$frequency);
+    if ($data != 0) {
+      my $start_obj = DateTime::Format::ISO8601->parse_datetime($start);
+      my $end_obj   = DateTime::Format::ISO8601->parse_datetime($end);
+      my $dur_obj   = $end_obj->subtract_datetime($start_obj);
+      my $duration  = eval($dur_obj->{'minutes'}*60+$dur_obj->{'seconds'});
     
-    while (defined $data->[$samples]->{'consumptionPower'}) {
+      while (defined $data->[$samples]->{'consumptionPower'}) {
         $power = $power + $data->[$samples]->{'consumptionPower'};
         $samples++;
+      }
+      return $power;
     }
+}
+
+
+#*****************************************************************
+
+=head2 get_ISO8601_time - convert linux time to the time part of ISO8601
+
+ Returns the time part in ISO8601 format of the specified linux time.
+
+   $NeurioTools->get_ISO8601_time($time);
+ 
+   This method accepts the following parameters:
+     - $time       : linux time - Required
+ 
+ Returns time part of ISO8601 format on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub get_ISO8601_time {
+    my ($self,$time) = @_;
+    my $ISO8601_time;
     
-    return $power;
+    if (!defined $time) {
+      print "\$$time is a required parameter\n" if ($self->{'debug'});
+      return 0;
+    } else {
+      my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime($time);
+      $ISO8601_time = sprintf("%02d:%02d:%02d",$hour,$min,$sec);
+    } 
+    return $ISO8601_time;
+}
+
+
+#*****************************************************************
+
+=head2 get_ISO8601_date - convert linux time to the date part of ISO8601
+
+ Returns the date part in ISO8601 fomrat of the specified linux time.
+
+   $NeurioTools->get_ISO8601_date($time);
+ 
+   This method accepts the following parameters:
+     - $time       : linux time - Required
+ 
+ Returns date part of ISO8601 format on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub get_ISO8601_date {
+    my ($self,$time) = @_;
+    my $ISO8601_date;
+    
+    if (!defined $time) {
+      print "\$$time is a required parameter\n" if ($self->{'debug'});
+      return 0;
+    } else {
+      my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime($time);
+      $ISO8601_date = sprintf("%04d\-%02d\-%02d",$year+1900,$mon+1,$mday);
+    }
+    return $ISO8601_date;
+}
+
+
+#*****************************************************************
+
+=head2 get_ISO8601_timezone - return the ISOS8601 timezone offset
+
+ Returns the timezone part in ISO8601 format for the current location
+ from the value specified with set_ISO8601_timezone
+
+   $NeurioTools->get_ISO8601_timezone();
+ 
+   This method accepts no parameters
+ 
+ Returns timezone offset 
+ 
+=cut
+
+sub get_ISO8601_timezone {
+	my $self = shift;
+    return $self->{'timezone'};
+}
+
+
+#*****************************************************************
+
+=head2 get_ISO8601 - return the entire ISOS8601 formatted date/time/timezone
+
+ Returns the entire ISO8601 formatted date/time/timezone based on the time
+ parameter passed
+
+   $NeurioTools->get_ISO8601($time);
+ 
+   This method accepts the following parameters:
+     - $time       : linux time - Required
+ 
+ Returns entire ISO8601 string on success 
+ Returns 0 on failure
+ 
+=cut
+
+sub get_ISO8601 {
+    my ($self,$time) = @_;
+    my $ISO8601;
+    
+    if (!defined $time) {
+      print "\$$time is a required parameter\n" if ($self->{'debug'});
+      return 0;
+    } else {
+      my $tz = $self->get_ISO8601_timezone();
+      my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime($time);
+      $ISO8601 = sprintf("%04d\-%02d\-%02dT%02d:%02d:%02d".$tz,$year+1900,$mon+1,$mday,$hour,$min,$sec);
+    }
+    return $ISO8601;
 }
 
 

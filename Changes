@@ -16,4 +16,8 @@ Revision history for Perl extension Device::NeurioTools.
         updated documentation
         added option to support debug printouts
         added method for 'get_power_consumed'
-                
+0.07    Oct 19, 2014
+        Added functions to calculate cost for 2-tiered ToU (still under development)
+        Added funcitons for ISO8601 calculations
+        Added funciton to get Appliance ID
+         
